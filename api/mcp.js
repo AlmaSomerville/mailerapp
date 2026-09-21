@@ -124,8 +124,12 @@ function buildServer() {
     if (!all[campaign]) return errorResult(`No sequence with key "${campaign}". Call list_sequences to see valid keys.`);
     const contact = await findContactByEmail(email);
     if (!contact) return errorResult(`No HubSpot contact found with email "${email}".`);
-    const firstSend = Date.now() + startInDays * 24 * 60 * 60 * 1000;
-    await updateContact(contact.id, { dw_campaign: campaign, dw_campaign_step: '1', dw_next_send: String(firstSend) });
+    // "Send now" must use the 0 sentinel, exactly as the HubSpot workflows do. A Date.now()
+    // stamp sorts to the TAIL of the ascending due queue, behind every stuck and deferred
+    // contact, and with a backlog larger than MAX_PER_RUN it is never reached. 0 sorts first.
+    // Same staleness-exemption trade-off noted in api/enroll.js.
+    const firstSend = startInDays > 0 ? String(Date.now() + startInDays * 24 * 60 * 60 * 1000) : '0';
+    await updateContact(contact.id, { dw_campaign: campaign, dw_campaign_step: '1', dw_next_send: firstSend });
     return textResult({ ok: true, contactId: contact.id, email, campaign });
   });
 
