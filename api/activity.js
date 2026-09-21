@@ -7,7 +7,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  const [events, allTime] = await Promise.all([getEvents(300), getAllTimeStats()]);
+  const [events, allTime] = await Promise.all([getEvents(2000), getAllTimeStats()]);
   const now = Date.now();
   const dayMs = 86400000;
   const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
