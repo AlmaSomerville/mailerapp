@@ -2,6 +2,7 @@
 import { getCampaigns } from '../lib/store.js';
 import { buildOwnerMap, getContactLive, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact, getDueCounts } from '../lib/hubspot.js';
 import { allocate } from '../lib/allocate.js';
+import { checkAlerts } from '../lib/alert.js';
 import { processContact } from '../lib/process.js';
 import { runTriggers, runSweep } from '../lib/triggers.js';
 import { hasMailFrom } from '../lib/gmail.js';
@@ -38,6 +39,10 @@ export default async function handler(req, res) {
     if (paused.length) summary.paused = paused;
 
     const senderCounts = {};
+    // Per-campaign outcomes, so alerting can tell a stall from a send-window
+    // deferral. Without that distinction it would fire every night.
+    const sentBy = {};
+    const windowBy = {};
     for (const contact of contacts) {
       if (Date.now() - startedAt > TIME_BUDGET_MS) {
         summary.note = 'time budget reached — remainder carries to the next run';
@@ -48,9 +53,15 @@ export default async function handler(req, res) {
         // Search results can be stale — re-fetch live before acting
         const fresh = await getContactLive(contact.id);
         const r = await processContact(fresh, campaigns, ownerMap);
-        if (r.status === 'sent') summary.sent++;
-        else if (r.status === 'completed') { summary.completed++; if (r.detail) summary.sent++; }
-        else if (r.status === 'skipped') { summary.deferred++; (summary.skips ||= []).push({ email, reason: r.detail }); }
+        const ck = fresh.properties?.dw_campaign || contact.properties?.dw_campaign || '?';
+        if (r.status === 'sent') { summary.sent++; sentBy[ck] = (sentBy[ck] || 0) + 1; }
+        else if (r.status === 'completed') { summary.completed++; if (r.detail) { summary.sent++; sentBy[ck] = (sentBy[ck] || 0) + 1; } }
+        else if (r.status === 'skipped') {
+          summary.deferred++;
+          (summary.skips ||= []).push({ email, reason: r.detail });
+          // A send-window deferral is the system working, not a fault.
+          if (/deferred/i.test(r.detail || '')) windowBy[ck] = (windowBy[ck] || 0) + 1;
+        }
         else summary.errors.push({ email, error: r.detail });
       } catch (err) {
         summary.errors.push({ email, error: err.message });
@@ -123,6 +134,20 @@ export default async function handler(req, res) {
     try {
       summary.waiting = await getDueCounts(Object.keys(campaigns));
     } catch { /* never fail a run over a count */ }
+
+    // Push if a campaign has stopped moving. Fires once per incident, only after
+    // the condition has held for ALERT_AFTER_RUNS runs, and announces recovery.
+    try {
+      const a = await checkAlerts({
+        waiting: summary.waiting || {},
+        allocated: perCampaign,
+        sentBy,
+        windowBy,
+        paused,
+        errors: summary.errors.length
+      });
+      if (a.alerted.length || a.recovered.length) summary.alerts = a;
+    } catch { /* never fail a run over an alert */ }
 
     summary.ms = Date.now() - startedAt;
     return res.status(200).json(summary);
