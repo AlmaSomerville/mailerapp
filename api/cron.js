@@ -1,6 +1,7 @@
-// api/cron.js — the sweep. Runs every 30 min via vercel.json cron.
+// api/cron.js — the sweep. Runs every 5 min via vercel.json cron.
 import { getCampaigns } from '../lib/store.js';
-import { getDueContacts, buildOwnerMap, getContactLive, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact } from '../lib/hubspot.js';
+import { buildOwnerMap, getContactLive, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact, getDueCounts } from '../lib/hubspot.js';
+import { allocate } from '../lib/allocate.js';
 import { processContact } from '../lib/process.js';
 import { runTriggers, runSweep } from '../lib/triggers.js';
 import { hasMailFrom } from '../lib/gmail.js';
@@ -10,6 +11,11 @@ import { logEvent, bumpStat, getLastSend, shouldReplyCheck } from '../lib/activi
 // it can't block, say, a Colorado lead at 6pm ET across the whole run.
 
 const MAX_PER_RUN = parseInt(process.env.MAX_PER_RUN || '40', 10);
+
+// Leave the function before Vercel's 120s maxDuration kills it mid-contact, so a
+// slow run reports what it did instead of vanishing. Whatever is left stays due
+// and the next tick picks it up.
+const TIME_BUDGET_MS = parseInt(process.env.CRON_TIME_BUDGET_MS || '95000', 10);
 
 export default async function handler(req, res) {
   // Vercel cron sends Authorization: Bearer <CRON_SECRET> automatically when CRON_SECRET is set.
@@ -21,10 +27,22 @@ export default async function handler(req, res) {
   const summary = { sent: 0, deferred: 0, completed: 0, errors: [] };
 
   try {
-    const [contacts, ownerMap, campaigns] = await Promise.all([getDueContacts(MAX_PER_RUN), buildOwnerMap(), getCampaigns()]);
+    const startedAt = Date.now();
+    const [ownerMap, campaigns] = await Promise.all([buildOwnerMap(), getCampaigns()]);
+
+    // Fair share across campaigns rather than one global queue ordered by
+    // dw_next_send. A released backlog can no longer occupy every slot and
+    // starve today's leads — see lib/allocate.js.
+    const { contacts, perCampaign, paused } = await allocate(campaigns, MAX_PER_RUN);
+    summary.allocated = perCampaign;
+    if (paused.length) summary.paused = paused;
 
     const senderCounts = {};
     for (const contact of contacts) {
+      if (Date.now() - startedAt > TIME_BUDGET_MS) {
+        summary.note = 'time budget reached — remainder carries to the next run';
+        break;
+      }
       const email = contact.properties?.email || contact.id;
       try {
         // Search results can be stale — re-fetch live before acting
@@ -100,6 +118,13 @@ export default async function handler(req, res) {
 
     }
 
+    // Backlog visibility. Without this, a campaign quietly accumulating is
+    // invisible until someone notices their leads stopped being contacted.
+    try {
+      summary.waiting = await getDueCounts(Object.keys(campaigns));
+    } catch { /* never fail a run over a count */ }
+
+    summary.ms = Date.now() - startedAt;
     return res.status(200).json(summary);
   } catch (err) {
     return res.status(500).json({ fatal: err.message, ...summary });
