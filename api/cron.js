@@ -1,8 +1,8 @@
 // api/cron.js — the sweep. Runs every 5 min via vercel.json cron.
 import { getCampaigns } from '../lib/store.js';
-import { buildOwnerMap, getContactLive, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact, getDueCounts } from '../lib/hubspot.js';
+import { buildOwnerMap, getContactLive, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact, getDueCount } from '../lib/hubspot.js';
 import { allocate } from '../lib/allocate.js';
-import { checkAlerts } from '../lib/alert.js';
+import { checkAlerts, rememberWaiting, readWaiting } from '../lib/alert.js';
 import { processContact } from '../lib/process.js';
 import { runTriggers, runSweep } from '../lib/triggers.js';
 import { hasMailFrom } from '../lib/gmail.js';
@@ -34,8 +34,9 @@ export default async function handler(req, res) {
     // Fair share across campaigns rather than one global queue ordered by
     // dw_next_send. A released backlog can no longer occupy every slot and
     // starve today's leads — see lib/allocate.js.
-    const { contacts, perCampaign, paused } = await allocate(campaigns, MAX_PER_RUN);
+    const { contacts, perCampaign, paused, searches } = await allocate(campaigns, MAX_PER_RUN);
     summary.allocated = perCampaign;
+    summary.searches = searches;
     if (paused.length) summary.paused = paused;
 
     const senderCounts = {};
@@ -129,10 +130,17 @@ export default async function handler(req, res) {
 
     }
 
-    // Backlog visibility. Without this, a campaign quietly accumulating is
-    // invisible until someone notices their leads stopped being contacted.
+    // Backlog visibility, one campaign per run on rotation. Counting every
+    // campaign each run cost more HubSpot searches than the sends did, and the
+    // search endpoint rate-limits hard enough that it timed the whole run out.
     try {
-      summary.waiting = await getDueCounts(Object.keys(campaigns));
+      const keys = Object.keys(campaigns);
+      if (keys.length) {
+        const which = keys[Math.floor(Date.now() / 300000) % keys.length];
+        await rememberWaiting(which, await getDueCount(which));
+      }
+      summary.waiting = await readWaiting(keys);
+      summary.searches = (summary.searches || 0) + 1;
     } catch { /* never fail a run over a count */ }
 
     // Push if a campaign has stopped moving. Fires once per incident, only after
