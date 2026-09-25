@@ -1,12 +1,10 @@
-// api/cron.js — the sweep. Runs every 5 min via vercel.json cron.
+// api/cron.js — the send loop. Runs every 5 min via vercel.json cron.
+// Reply detection and engagement rules are in api/sweep.js, every 15 min.
 import { getCampaigns } from '../lib/store.js';
-import { buildOwnerMap, getContactLive, getContactsLive, getOwnerAndDealNameMany, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact, getDueCount } from '../lib/hubspot.js';
+import { buildOwnerMap, getContactLive, getContactsLive, getOwnerAndDealNameMany, getDueCount } from '../lib/hubspot.js';
 import { allocate } from '../lib/allocate.js';
 import { checkAlerts, rememberWaiting, readWaiting } from '../lib/alert.js';
 import { processContact } from '../lib/process.js';
-import { runTriggers, runSweep } from '../lib/triggers.js';
-import { hasMailFrom } from '../lib/gmail.js';
-import { logEvent, bumpStat, getLastSend, shouldReplyCheck } from '../lib/activity.js';
 // NOTE: the send window is no longer global — it's per-campaign and evaluated in each
 // recipient's timezone inside processContact(). The old global gate has been removed so
 // it can't block, say, a Colorado lead at 6pm ET across the whole run.
@@ -89,63 +87,10 @@ export default async function handler(req, res) {
     // ── Reply sweep:
     //   waiting contacts (future step pending) → reply cancels the sequence
     //   completed contacts (within 14 days of last send) → reply is logged for stats only
-    summary.replied = 0;
-    const REPLY_WINDOW_MS = 14 * 86400000;
-
-    async function checkReply(rec, { unenroll }) {
-      if (campaigns[rec.properties?.dw_campaign]?.type === 'checklist') return; // onboarding stops only when the checklist is done
-      if (!(await shouldReplyCheck(rec.id, 4))) return; // each contact checked at most every 4h
-      // Scoped to the contact's current campaign, matching lib/process.js. Unscoped, a
-      // reply to an older sequence would unenrol them from the one they are in now.
-      const lastSend = await getLastSend(rec.id, rec.properties?.dw_campaign);
-      if (!lastSend) return;                                    // pre-tracking sends: no window, skip
-      if (!unenroll && Date.now() - lastSend > REPLY_WINDOW_MS) return; // completed: stop watching after 14d
-      const email = rec.properties?.email;
-      if (!email) return;
-      const ownerId = await getDealOwnerId(rec.id);
-      const owner = ownerId ? ownerMap[String(ownerId)] : null;
-      if (!owner?.email) return;
-      const replied = await hasMailFrom(owner.email, email, lastSend);
-      if (replied !== true) return;
-
-      if (unenroll) await updateContact(rec.id, { dw_campaign: '', dw_next_send: '' });
-      await logEvent({
-        type: 'replied', contact: email, campaign: rec.properties?.dw_campaign,
-        step: Math.max(1, parseInt(rec.properties?.dw_campaign_step || '2', 10) - 1), sender: owner.email,
-        detail: unenroll ? 'sequence stopped — reply detected by sweep' : 'reply after sequence completed'
-      });
-      await bumpStat(rec.properties?.dw_campaign, 'replied');
-      summary.replied++;
-    }
-
-    try {
-      const [waiting, completed] = await Promise.all([getWaitingContacts(100), getCompletedContacts(100)]);
-      for (const w of waiting)  { try { await checkReply(w, { unenroll: true  }); } catch { /* keep sweeping */ } }
-      for (const d of completed) { try { await checkReply(d, { unenroll: false }); } catch { /* keep sweeping */ } }
-    } catch (e) {
-      summary.errors.push({ warn: `reply sweep: ${e.message}` });
-    }
-
-    // Engagement rules: the pixel and click endpoints only enqueue, so evaluation happens here.
-
-    try {
-
-      const t = await runTriggers(50);
-
-      if (t.processed) summary.triggers = t;
-
-      // Delayed rules ("hasn't opened in 24h") have no event to react to, so they are
-      // evaluated by sweeping the send index for sends now old enough to judge.
-
-      const sw = await runSweep();
-
-      if (sw.checked || sw.fired || sw.errors.length) summary.sweep = sw;
-
-    } catch (e) {
-
-      summary.errors.push(`triggers: ${e.message}`);
-
-    }
+    // Reply detection and engagement rules now live in api/sweep.js on their own
+    // 15-minute cron. They did a Gmail lookup per contact across up to 200
+    // contacts with no time budget, which is what pushed runs to 100s once
+    // sending got fast. Sending keeps the 5-minute schedule and the full window.
 
     // Backlog visibility, one campaign per run on rotation. Counting every
     // campaign each run cost more HubSpot searches than the sends did, and the
