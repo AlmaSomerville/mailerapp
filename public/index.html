@@ -323,6 +323,11 @@ a{color:var(--navy);text-decoration:none}
 .rppanel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:#fff;border:1.5px solid var(--line);
   border-radius:11px;box-shadow:0 10px 30px rgba(16,24,32,.13);padding:10px;min-width:300px;max-width:440px;
   max-height:58vh;overflow:auto;display:grid;gap:12px}
+.rppanel-top{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:2px 4px 8px;border-bottom:1px solid var(--line);margin-bottom:2px}
+.rppanel-top span{font-size:12px;color:var(--mute)}
+.rppanel-top .rplink{font-weight:600;font-size:12.5px}
+.rppanel-body{display:grid;gap:12px}
 .rpgroup-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:3px}
 .rpgroup-head b{font-size:11.5px;letter-spacing:.04em;color:var(--mute);text-transform:uppercase}
 .rplink{border:none;background:none;color:var(--navy);font-size:11.5px;cursor:pointer;padding:2px 4px;border-radius:5px}
@@ -1810,6 +1815,31 @@ function rpSummaryLabel(){
   return `${rpSel.length} sequences`;
 }
 
+/* Kept outside drawCampaignChips so the panel survives a re-render — ticking a
+   box reloads the report, and the picker must not slam shut while you are still
+   choosing. */
+let rpPanelOpen=false, rpOutsideHandler=null;
+
+function rpClosePanel(){
+  rpPanelOpen=false;
+  const panel=$('rpPanel'), btn=$('rpPickBtn');
+  if(panel) panel.hidden=true;
+  if(btn) btn.setAttribute('aria-expanded','false');
+  if(rpOutsideHandler){ document.removeEventListener('mousedown',rpOutsideHandler); rpOutsideHandler=null; }
+}
+
+function rpOpenPanel(){
+  rpPanelOpen=true;
+  const panel=$('rpPanel'), btn=$('rpPickBtn');
+  if(panel) panel.hidden=false;
+  if(btn) btn.setAttribute('aria-expanded','true');
+  if(rpOutsideHandler) document.removeEventListener('mousedown',rpOutsideHandler);
+  rpOutsideHandler=(e)=>{ if(!e.target.closest('#rpPanel') && !e.target.closest('#rpPickBtn')) rpClosePanel(); };
+  document.addEventListener('mousedown',rpOutsideHandler);
+}
+
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&rpPanelOpen) rpClosePanel(); });
+
 function drawCampaignChips(){
   const host=$('rpCampaigns'); if(!host) return;
   const keys=Object.keys(campaigns);
@@ -1821,13 +1851,18 @@ function drawCampaignChips(){
   if(loose.length) groups.push({id:'__loose',name:'Ungrouped',keys:loose});
 
   host.innerHTML=
-    `<button class="rppick" id="rpPickBtn" aria-expanded="false">
+    `<button class="rppick" id="rpPickBtn" aria-expanded="${rpPanelOpen}">
        <span class="rppick-lbl">Showing</span>
        <b>${esc(rpSummaryLabel())}</b>
        <span class="rppick-car">\u25be</span>
      </button>
      ${rpSel.length?'<button class="rpchip" id="rpClear">Clear</button>':''}
-     <div class="rppanel" id="rpPanel" hidden>
+     <div class="rppanel" id="rpPanel" ${rpPanelOpen?'':'hidden'}>
+       <div class="rppanel-top">
+         <span>${rpSel.length?`${rpSel.length} selected`:'All sequences'}</span>
+         <button class="rplink" id="rpDone">Done</button>
+       </div>
+       <div class="rppanel-body">
        ${groups.map(g=>{
          const on=g.keys.filter(k=>rpSel.includes(k)).length;
          return `<div class="rpgroup">
@@ -1840,29 +1875,31 @@ function drawCampaignChips(){
                <span>${esc(campaigns[k].label||k)}</span></label>`).join('')}
          </div>`;
        }).join('')}
+       </div>
      </div>`;
 
-  const panel=$('rpPanel'), btn=$('rpPickBtn');
-  btn.onclick=(e)=>{ e.stopPropagation(); const open=!panel.hidden; panel.hidden=open; btn.setAttribute('aria-expanded',String(!open)); };
-  panel.onclick=(e)=>e.stopPropagation();
-  document.addEventListener('click',()=>{ if(panel&&!panel.hidden){ panel.hidden=true; btn.setAttribute('aria-expanded','false'); } },{once:true});
+  const btn=$('rpPickBtn');
+  btn.onclick=(e)=>{ e.stopPropagation(); rpPanelOpen?rpClosePanel():rpOpenPanel(); };
+  $('rpDone').onclick=()=>rpClosePanel();
 
   const clear=$('rpClear');
   if(clear) clear.onclick=()=>{ rpSel=[]; loadReports(); };
 
-  panel.querySelectorAll('[data-rp]').forEach(cb=>cb.onchange=()=>{
+  $('rpPanel').querySelectorAll('[data-rp]').forEach(cb=>cb.onchange=()=>{
     const k=cb.dataset.rp;
     rpSel = cb.checked ? [...new Set([...rpSel,k])] : rpSel.filter(x=>x!==k);
-    btn.querySelector('b').textContent=rpSummaryLabel();
     loadReports();
   });
 
-  panel.querySelectorAll('[data-rpall]').forEach(b=>b.onclick=()=>{
+  $('rpPanel').querySelectorAll('[data-rpall]').forEach(b=>b.onclick=()=>{
     const g=groups.find(x=>x.id===b.dataset.rpall); if(!g) return;
     const all=g.keys.every(k=>rpSel.includes(k));
     rpSel = all ? rpSel.filter(k=>!g.keys.includes(k)) : [...new Set([...rpSel,...g.keys])];
     loadReports();
   });
+
+  // Re-attach the outside handler after a re-render, or it points at a dead node.
+  if(rpPanelOpen) rpOpenPanel();
 }
 
 function pct(n,d){ return d?Math.round(1000*n/d)/10:0; }
