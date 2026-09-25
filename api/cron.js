@@ -34,9 +34,10 @@ export default async function handler(req, res) {
     // Fair share across campaigns rather than one global queue ordered by
     // dw_next_send. A released backlog can no longer occupy every slot and
     // starve today's leads — see lib/allocate.js.
-    const { contacts, perCampaign, paused, searches } = await allocate(campaigns, MAX_PER_RUN);
+    const { contacts, perCampaign, paused, searches, starved } = await allocate(campaigns, MAX_PER_RUN);
     summary.allocated = perCampaign;
     summary.searches = searches;
+    if (starved?.length) summary.starved = starved;
     if (paused.length) summary.paused = paused;
 
     const senderCounts = {};
@@ -152,6 +153,7 @@ export default async function handler(req, res) {
         sentBy,
         windowBy,
         paused,
+        tiers: Object.fromEntries(Object.entries(campaigns).map(([k, c]) => [k, c?.priority || 'normal'])),
         errors: summary.errors.length
       });
       if (a.alerted.length || a.recovered.length) summary.alerts = a;
