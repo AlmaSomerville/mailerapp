@@ -320,9 +320,13 @@ a{color:var(--navy);text-decoration:none}
 .rppick[aria-expanded=true]{border-color:var(--navy)}
 .rppick-lbl{color:var(--mute);font-size:12px}
 .rppick-car{color:var(--mute);font-size:11px}
-.rppanel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:#fff;border:1.5px solid var(--line);
-  border-radius:11px;box-shadow:0 10px 30px rgba(16,24,32,.13);padding:10px;min-width:300px;max-width:440px;
-  max-height:58vh;overflow:auto;display:grid;gap:12px}
+/* Closed is the default and open needs a class. Relying on the [hidden] attribute
+   meant the browser's user-agent rule had to beat this block's display value, which
+   it does not — so the panel sat open permanently while the attribute said closed. */
+.rppanel{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:#fff;
+  border:1.5px solid var(--line);border-radius:11px;box-shadow:0 10px 30px rgba(16,24,32,.13);
+  padding:10px;min-width:300px;max-width:440px;max-height:58vh;overflow:auto;gap:12px}
+.rppanel.open{display:grid}
 .rppanel-top{display:flex;align-items:center;gap:8px;padding:2px 2px 9px;border-bottom:1px solid var(--line);margin-bottom:2px}
 .rpsearch{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:7px;padding:6px 10px;font-size:12.5px;outline:none}
 .rpsearch:focus{border-color:var(--navy)}
@@ -1845,7 +1849,7 @@ function renderPicker(hostId, sel, onChange){
        <span class="rppick-lbl">Showing</span><b>${esc(pickerLabel(sel))}</b><span class="rppick-car">\u25be</span>
      </button>
      ${sel.length ? '<button type="button" class="rpchip" data-pick-clear>Clear</button>' : ''}
-     <div class="rppanel" ${st.open ? '' : 'hidden'}>
+     <div class="rppanel${st.open ? ' open' : ''}">
        <div class="rppanel-top">
          <input class="rpsearch" type="text" placeholder="Search sequences\u2026" value="${esc(st.query)}" data-pick-search>
          <button type="button" class="rplink" data-pick-done>Done</button>
