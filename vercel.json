@@ -3,6 +3,10 @@
     {
       "path": "/api/cron",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/sweep",
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {
