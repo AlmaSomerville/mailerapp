@@ -12,6 +12,8 @@
 // from this endpoint means every module resolved.
 import { appBaseUrl } from '../lib/util.js';
 import * as activity from '../lib/activity.js';
+import * as alert from '../lib/alert.js';
+import * as allocate from '../lib/allocate.js';
 import * as bounces from '../lib/bounces.js';
 import * as checklist from '../lib/checklist.js';
 import * as designs from '../lib/designs.js';
