@@ -425,9 +425,13 @@ table.tbl tr:hover td{background:#fafbfd}
 .bl-tag.passive{background:#eef1f4;color:#5b6b7a}
 .bl-tag.live{background:#e6f4ec;color:#1d6b43}
 .bl-tag.paused{background:#fdeeee;color:#8c2f2f}
-.acttbl .grow{cursor:pointer}
-.acttbl .grow:hover{background:rgba(0,0,0,.025)}
-.acttbl .grow td:first-child{font-size:13px}
+.acttbl .grow{cursor:pointer;background:rgba(15,32,56,.035)}
+.acttbl .grow:hover{background:rgba(15,32,56,.06)}
+.acttbl .grow td{border-top:1px solid var(--line)}
+.acttbl .grow td:first-child{font-size:13px;display:flex;align-items:center;gap:7px}
+.acttbl .gfic{width:15px;height:15px;color:var(--brass);flex:0 0 auto}
+.acttbl .sqbar{display:inline-block;width:14px;height:1px;background:var(--line);margin:0 9px 3px 22px}
+.acttbl .seqrow td:first-child{color:var(--slate)}
 .acttbl .grow b{cursor:pointer;border-bottom:1px dashed transparent}
 .acttbl .grow b:hover{border-bottom-color:var(--mute)}
 .acttbl .gcar{display:inline-block;transition:transform .15s;color:var(--mute);font-size:11px}
@@ -1473,7 +1477,20 @@ function renderActivity(){
   // Opens and clicks only exist on email, so they divide by sent_email, not by
   // total sends. Dividing by everything made any sequence with a text step look
   // worse than it is, and is why these numbers disagreed with Reports.
-  const emailSent=(v)=>v.sent_email!=null?v.sent_email:(v.sent||0)-(v.sent_sms||0);
+  /* Opens and clicks only exist on email, so rates divide by email sends, not all
+     sends. Two wrinkles: sent_email only started being recorded recently, so for
+     older sequences it is far smaller than the all-time open count and would give
+     absurd rates; and sent_sms has the same gap. So take the first denominator
+     that is at least as large as the number of opens — anything smaller cannot be
+     the real denominator — and fall back to total sends. */
+  const emailSent=(v)=>{
+    const opened=v.opened||0;
+    const tracked=v.sent_email||0;
+    const legacy=(v.sent||0)-(v.sent_sms||0);
+    if(tracked>=opened && tracked>0) return tracked;
+    if(legacy>=opened && legacy>0) return legacy;
+    return v.sent||0;
+  };
   const rate=(n,d)=>d>0?Math.round((n||0)/d*100):null;
 
   const cell=(n,d)=>{ const r=rate(n,d); return `<td>${n||0}${r!=null?` <span style="color:var(--mute)">(${r}%)</span>`:''}</td>`; };
@@ -1484,7 +1501,7 @@ function renderActivity(){
 
   const seqRow=(k)=>{ const v=pc[k]||{}, em=emailSent(v);
     const on=actSel.includes(k);
-    return `<tr class="seqrow${on?' on':''}" data-seq="${esc(k)}"><td style="padding-left:26px">${esc(campaigns[k]?.label||k)}</td>`+
+    return `<tr class="seqrow${on?' on':''}" data-seq="${esc(k)}"><td><span class="sqbar"></span>${esc(campaigns[k]?.label||k)}</td>`+
       `<td>${v.sent||0}</td>${cell(v.opened,em)}${cell(v.clicked,em)}${cell(v.replied,v.sent||0)}</tr>`;
   };
 
@@ -1503,7 +1520,8 @@ function renderActivity(){
     const open=actOpenFolders.has(g.id)||g.keys.some(k=>actSel.includes(k));
     const picked=g.keys.filter(k=>actSel.includes(k)).length;
     body+=`<tr class="grow${open?' open':''}" data-fold="${esc(g.id)}">`+
-      `<td><span class="gcar">\u25b8</span> <b>${esc(g.name)}</b> <span class="gcount">${g.keys.length}${picked?` \u00b7 ${picked} selected`:''}</span></td>`+
+      `<td><span class="gcar">\u25b8</span><svg class="gfic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`+
+      `<b>${esc(g.name)}</b> <span class="gcount">${g.keys.length}${picked?` \u00b7 ${picked} selected`:''}</span></td>`+
       `<td>${t.sent}</td>${cell(t.opened,t.em)}${cell(t.clicked,t.em)}${cell(t.replied,t.sent)}</tr>`;
     if(open) body+=g.keys.sort((a,b)=>(campaigns[a].label||a).localeCompare(campaigns[b].label||b)).map(seqRow).join('');
   }
