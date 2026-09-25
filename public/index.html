@@ -397,6 +397,26 @@ table.tbl th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.05
 table.tbl td{padding:11px 15px;border-bottom:1px solid var(--line-2);color:var(--ink);vertical-align:middle}
 table.tbl tr:last-child td{border-bottom:none}
 table.tbl tr:hover td{background:#fafbfd}
+.bl-total{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}
+.bl-total b{font-size:26px;font-variant-numeric:tabular-nums}
+.bl-total span{color:var(--mute);font-size:13px}
+.bl-tag{font-size:10.5px;padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:1px}
+.bl-tag.passive{background:#eef1f4;color:#5b6b7a}
+.bl-tag.live{background:#e6f4ec;color:#1d6b43}
+.bl-tag.paused{background:#fdeeee;color:#8c2f2f}
+.acttbl .grow{cursor:pointer}
+.acttbl .grow:hover{background:rgba(0,0,0,.025)}
+.acttbl .grow td:first-child{font-size:13px}
+.acttbl .grow b{cursor:pointer;border-bottom:1px dashed transparent}
+.acttbl .grow b:hover{border-bottom-color:var(--mute)}
+.acttbl .gcar{display:inline-block;transition:transform .15s;color:var(--mute);font-size:11px}
+.acttbl .grow.open .gcar{transform:rotate(90deg)}
+.acttbl .gcount{color:var(--mute);font-weight:400;font-size:12px;margin-left:4px}
+.acttbl .seqrow{cursor:pointer}
+.acttbl .seqrow:hover{background:rgba(0,0,0,.025)}
+.acttbl .seqrow.on{background:rgba(37,99,235,.07);font-weight:600}
+.actsel-lbl{font-size:12px;color:var(--mute);margin-right:6px;align-self:center}
+.rpchip .x{opacity:.55;margin-left:3px}
 .selectbox{padding:8px 12px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff;color:var(--ink);outline:none;cursor:pointer}
 
 /* ── settings view ── */
@@ -597,7 +617,7 @@ table.tbl tr:hover td{background:#fafbfd}
 
     <!-- SETTINGS -->
     <div id="settingsView" style="display:none">
-      <div class="tabs"><button class="on" data-tab="numbers" id="tabNumbers">SMS numbers</button><button data-tab="links" id="tabLinks">Booking links</button><button data-tab="prog" id="tabProg">Program links</button><button data-tab="ph" id="tabPh">Placeholders</button></div>
+      <div class="tabs"><button class="on" data-tab="numbers" id="tabNumbers">SMS numbers</button><button data-tab="links" id="tabLinks">Booking links</button><button data-tab="prog" id="tabProg">Program links</button><button data-tab="ph" id="tabPh">Placeholders</button><button data-tab="backlog" id="tabBacklog">Backlog</button></div>
       <div class="setgrid">
         <div class="setcard" id="numbersCard">
           <h3>SMS sending numbers</h3>
@@ -605,6 +625,12 @@ table.tbl tr:hover td{background:#fafbfd}
           <div id="numbersBody"></div>
           <div class="add-row"><button class="add-step" id="addNumberBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add a number</button></div>
           <div class="modal-actions"><button class="btn btn-brass" id="saveNumbersBtn">Save numbers</button></div>
+        </div>
+        <div class="setcard" id="backlogCard" style="display:none">
+          <h3>Queued and waiting</h3>
+          <div class="sub">Contacts due to be sent but not yet processed. Sequences set to <b>passive</b> take spare capacity only, so a backlog sitting there is normal — it drains when live leads are quiet. Counts refresh a few at a time in the background, so each is up to a couple of hours old.</div>
+          <div id="backlogBody"><div class="empty" style="padding:14px 0">Loading…</div></div>
+          <div class="modal-actions"><button class="btn" id="refreshBacklogBtn">Refresh</button></div>
         </div>
         <div class="setcard" id="linksCard" style="display:none">
           <h3>Sender booking links</h3>
@@ -1362,15 +1388,37 @@ async function loadActivity(){
 
 /* Sequence chips. Empty selection = every sequence. */
 let actSel=[], lastStats=null;
+/* The chip wall listed every sequence, and the table below listed them all again.
+   With 35 sequences that was two unreadable walls saying the same thing. The table
+   is now the filter: click a row to scope, click a folder to scope to the lot.
+   Only a compact summary of the current selection stays up here. */
+let actOpenFolders = new Set();
+
 function drawActChips(){
-  const keys=Object.keys(campaigns);
-  $('actChips').innerHTML=keys.map(k=>
-    `<button class="rpchip ${actSel.includes(k)?'on':''}" data-ac="${esc(k)}">${esc(campaigns[k].label||k)}</button>`).join('');
-  $('actChips').querySelectorAll('[data-ac]').forEach(b=>b.onclick=()=>{
-    const k=b.dataset.ac;
-    actSel = actSel.includes(k) ? actSel.filter(x=>x!==k) : [...actSel,k];
+  const el=$('actChips'); if(!el) return;
+  if(!actSel.length){ el.innerHTML=''; return; }
+  el.innerHTML =
+    `<span class="actsel-lbl">Showing</span>` +
+    actSel.map(k=>`<button class="rpchip on" data-ac="${esc(k)}">${esc(campaigns[k]?.label||k)} <span class="x">&times;</span></button>`).join('') +
+    `<button class="rpchip" data-acclear>Clear</button>`;
+  el.querySelectorAll('[data-ac]').forEach(b=>b.onclick=()=>{
+    actSel = actSel.filter(x=>x!==b.dataset.ac);
     drawActChips(); renderActivity();
   });
+  const c=el.querySelector('[data-acclear]');
+  if(c) c.onclick=()=>{ actSel=[]; drawActChips(); renderActivity(); };
+}
+
+function toggleActSel(k, additive){
+  if(additive) actSel = actSel.includes(k) ? actSel.filter(x=>x!==k) : [...actSel,k];
+  else actSel = (actSel.length===1 && actSel[0]===k) ? [] : [k];
+  drawActChips(); renderActivity();
+}
+
+function toggleActFolder(id, keys){
+  const all = keys.every(k=>actSel.includes(k));
+  actSel = all ? actSel.filter(k=>!keys.includes(k)) : [...new Set([...actSel, ...keys])];
+  drawActChips(); renderActivity();
 }
 
 /* Tiles + all-time table, both scoped to the chip selection.
@@ -1401,13 +1449,60 @@ function renderActivity(){
     tile('g',today.replied,'Replied today',week.replied,at.replied)+
     tile('e',today.errors,'Errors today',week.errors,null);
 
-  const rows=keys.filter(k=>pc[k]).map(k=>{ const v=pc[k];
-    const r=(n)=>v.sent?Math.round((n||0)/v.sent*100):0;
-    return `<tr><td style="font-weight:600">${esc(campaigns[k]?.label||k)}</td><td>${v.sent||0}</td><td>${v.opened||0} <span style="color:var(--mute)">(${r(v.opened)}%)</span></td><td>${v.clicked||0} <span style="color:var(--mute)">(${r(v.clicked)}%)</span></td><td>${v.replied||0} <span style="color:var(--mute)">(${r(v.replied)}%)</span></td></tr>`;
-  }).join('');
-  $('campTotals').innerHTML=rows
-    ? `<div class="tablewrap"><table class="tbl"><thead><tr><th>${scoped?`Selected ${keys.length===1?'sequence':'sequences'}`:'Sequence'} \u00b7 all time</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : '<div class="empty" style="padding:14px 0">No totals for that selection yet</div>';
+  // Opens and clicks only exist on email, so they divide by sent_email, not by
+  // total sends. Dividing by everything made any sequence with a text step look
+  // worse than it is, and is why these numbers disagreed with Reports.
+  const emailSent=(v)=>v.sent_email!=null?v.sent_email:(v.sent||0)-(v.sent_sms||0);
+  const rate=(n,d)=>d>0?Math.round((n||0)/d*100):null;
+
+  const cell=(n,d)=>{ const r=rate(n,d); return `<td>${n||0}${r!=null?` <span style="color:var(--mute)">(${r}%)</span>`:''}</td>`; };
+
+  const sum=(ks)=>ks.reduce((a,k)=>{ const v=pc[k]||{};
+    a.sent+=v.sent||0; a.em+=emailSent(v); a.opened+=v.opened||0; a.clicked+=v.clicked||0; a.replied+=v.replied||0; return a;
+  },{sent:0,em:0,opened:0,clicked:0,replied:0});
+
+  const seqRow=(k)=>{ const v=pc[k]||{}, em=emailSent(v);
+    const on=actSel.includes(k);
+    return `<tr class="seqrow${on?' on':''}" data-seq="${esc(k)}"><td style="padding-left:26px">${esc(campaigns[k]?.label||k)}</td>`+
+      `<td>${v.sent||0}</td>${cell(v.opened,em)}${cell(v.clicked,em)}${cell(v.replied,v.sent||0)}</tr>`;
+  };
+
+  // Group by the folders already used in the sequence list, so the same mental
+  // model works in both places. Folders start closed; a folder holding a selected
+  // sequence opens itself.
+  const withStats=Object.keys(pc).filter(k=>campaigns[k]);
+  const groups=folders.map(f=>({ id:f.id, name:f.name, keys:withStats.filter(k=>campaigns[k].folder===f.id) }))
+    .filter(g=>g.keys.length);
+  const loose=withStats.filter(k=>!folders.some(f=>campaigns[k].folder===f.id));
+  if(loose.length) groups.push({ id:'__loose', name:'Ungrouped', keys:loose });
+
+  let body='';
+  for(const g of groups){
+    const t=sum(g.keys);
+    const open=actOpenFolders.has(g.id)||g.keys.some(k=>actSel.includes(k));
+    const picked=g.keys.filter(k=>actSel.includes(k)).length;
+    body+=`<tr class="grow${open?' open':''}" data-fold="${esc(g.id)}">`+
+      `<td><span class="gcar">\u25b8</span> <b>${esc(g.name)}</b> <span class="gcount">${g.keys.length}${picked?` \u00b7 ${picked} selected`:''}</span></td>`+
+      `<td>${t.sent}</td>${cell(t.opened,t.em)}${cell(t.clicked,t.em)}${cell(t.replied,t.sent)}</tr>`;
+    if(open) body+=g.keys.sort((a,b)=>(campaigns[a].label||a).localeCompare(campaigns[b].label||b)).map(seqRow).join('');
+  }
+
+  $('campTotals').innerHTML=body
+    ? `<div class="tablewrap"><table class="tbl acttbl"><thead><tr><th>Sequence \u00b7 all time</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>${body}</tbody></table></div>`
+      + `<div class="hint" style="margin:8px 2px 0">Click a sequence to show only its events. Shift-click to add another. Click a folder name to take the whole folder.</div>`
+    : '<div class="empty" style="padding:14px 0">No totals yet</div>';
+
+  $('campTotals').querySelectorAll('.grow').forEach(r=>{
+    r.onclick=(e)=>{
+      const g=groups.find(x=>x.id===r.dataset.fold); if(!g) return;
+      // The name scopes the feed to the folder; anywhere else just opens it.
+      if(e.target.closest('b')) toggleActFolder(g.id,g.keys);
+      else { actOpenFolders.has(g.id)?actOpenFolders.delete(g.id):actOpenFolders.add(g.id); renderActivity(); }
+    };
+  });
+  $('campTotals').querySelectorAll('.seqrow').forEach(r=>{
+    r.onclick=(e)=>toggleActSel(r.dataset.seq, e.shiftKey);
+  });
 
   renderActRows();
 }
@@ -1486,17 +1581,49 @@ $('addProgLinkBtn').onclick=()=>{ const d=document.createElement('div'); d.class
 $('saveProgLinksBtn').onclick=async()=>{ const map={}; $('progLinkRows').querySelectorAll('.srow').forEach(r=>{ const nm=r.querySelector('[data-f="name"]').value.trim(),url=r.querySelector('[data-f="url"]').value.trim(); if(nm&&url)map[nm]=url; }); const res=await api('/api/settings',{method:'POST',body:JSON.stringify({programLinks:map,programLinkFallback:$('progFallbackLink').value.trim()})}); if(res.ok){ appSettings=await res.json(); toast('Program links saved','ok'); } else toast('Could not save','err'); };
 $('addCustomItemBtn').onclick=()=>{ const c=campaigns[activeKey]; (c.customItems=c.customItems||[]).push({label:'',property:'',mode:'empty',value:'',block:''}); renderCustomItems(); };
 function setTab(which){
-  const map={numbers:['tabNumbers','numbersCard'],links:['tabLinks','linksCard'],prog:['tabProg','progCard'],ph:['tabPh','phCard']};
+  const map={numbers:['tabNumbers','numbersCard'],links:['tabLinks','linksCard'],prog:['tabProg','progCard'],ph:['tabPh','phCard'],backlog:['tabBacklog','backlogCard']};
   for(const [k,[btn,card]] of Object.entries(map)){
     $(btn).classList.toggle('on',k===which);
     $(card).style.display = k===which?'block':'none';
   }
   if(which==='ph') renderPlaceholders();
+  if(which==='backlog') loadBacklog();
 }
 $('tabNumbers').onclick=()=>setTab('numbers');
 $('tabLinks').onclick=()=>setTab('links');
 $('tabProg').onclick=()=>setTab('prog');
 $('tabPh').onclick=()=>setTab('ph');
+$('tabBacklog').onclick=()=>setTab('backlog');
+
+/* ── Backlog ─────────────────────────────────────────────────────────────────
+   Reads the counts the cron already caches, so opening this costs nothing. A
+   passive sequence sitting on a large number is working as intended: it takes
+   spare capacity only and drains when live leads are quiet. */
+async function loadBacklog(){
+  const body=$('backlogBody');
+  body.innerHTML='<div class="empty" style="padding:14px 0">Loading\u2026</div>';
+  try{
+    const res=await api('/api/backlog');
+    if(!res.ok) throw new Error('Could not load the backlog');
+    const d=await res.json();
+
+    if(!d.rows.length){ body.innerHTML='<div class="empty" style="padding:14px 0">Nothing is waiting. Everything due has been sent.</div>'; return; }
+
+    const tag=(r)=> r.paused ? '<span class="bl-tag paused">paused</span>'
+      : r.priority==='passive' ? '<span class="bl-tag passive">passive</span>'
+      : r.priority==='live' ? '<span class="bl-tag live">live</span>' : '';
+
+    const rows=d.rows.map(r=>`<tr><td>${esc(r.label)} ${tag(r)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${r.waiting===null?'<span style="color:var(--mute)">not counted yet</span>':r.waiting}</td></tr>`).join('');
+
+    body.innerHTML =
+      `<div class="bl-total"><b>${d.total}</b><span>contacts waiting across ${d.rows.filter(r=>r.waiting).length} sequences</span></div>`+
+      `<div class="tablewrap"><table class="tbl"><thead><tr><th>Sequence</th><th style="text-align:right">Waiting</th></tr></thead><tbody>${rows}</tbody></table></div>`+
+      `<div class="hint" style="margin:8px 2px 0">${d.counted} of ${d.of} sequences counted so far. Counts refresh a few at a time in the background.</div>`;
+  }catch(e){
+    body.innerHTML=`<div class="empty" style="padding:14px 0">${esc(e.message)}</div>`;
+  }
+}
+$('refreshBacklogBtn').onclick=()=>loadBacklog();
 
 /* ── Placeholders editor ─────────────────────────────────────────────────────
    Property lists come from /api/hs-properties so you pick a real property
