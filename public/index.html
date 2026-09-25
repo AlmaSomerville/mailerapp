@@ -323,12 +323,15 @@ a{color:var(--navy);text-decoration:none}
 .rppanel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:#fff;border:1.5px solid var(--line);
   border-radius:11px;box-shadow:0 10px 30px rgba(16,24,32,.13);padding:10px;min-width:300px;max-width:440px;
   max-height:58vh;overflow:auto;display:grid;gap:12px}
-.rppanel-top{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  padding:2px 4px 8px;border-bottom:1px solid var(--line);margin-bottom:2px}
+.rppanel-top{display:flex;align-items:center;gap:8px;padding:2px 2px 9px;border-bottom:1px solid var(--line);margin-bottom:2px}
+.rpsearch{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:7px;padding:6px 10px;font-size:12.5px;outline:none}
+.rpsearch:focus{border-color:var(--navy)}
+.rppanel-foot{border-top:1px solid var(--line);padding-top:8px;margin-top:2px;font-size:11.5px;color:var(--mute)}
+.rpgcount{font-size:11px;color:var(--mute);margin-right:auto}
 .rppanel-top span{font-size:12px;color:var(--mute)}
 .rppanel-top .rplink{font-weight:600;font-size:12.5px}
 .rppanel-body{display:grid;gap:12px}
-.rpgroup-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:3px}
+.rpgroup-head{display:flex;align-items:center;gap:8px;margin-bottom:3px}
 .rpgroup-head b{font-size:11.5px;letter-spacing:.04em;color:var(--mute);text-transform:uppercase}
 .rplink{border:none;background:none;color:var(--navy);font-size:11.5px;cursor:pointer;padding:2px 4px;border-radius:5px}
 .rplink:hover{background:rgba(0,0,0,.04)}
@@ -629,7 +632,7 @@ table.tbl tr:hover td{background:#fafbfd}
     <div id="activityView" style="display:none">
       <div class="statgrid" id="statGrid"></div>
       <div id="campTotals" style="margin-bottom:14px"></div>
-      <div class="rpchips" id="actChips" style="margin-bottom:10px"></div>
+      <div class="rpchips" id="actChips" style="margin-bottom:12px"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap">
         <select class="selectbox" id="actType"><option value="">All events</option><option value="sent">Sent</option><option value="opened">Opened</option><option value="clicked">Clicked</option><option value="replied">Replied</option><option value="task">Task created</option><option value="skipped">Skipped</option><option value="error">Errors</option></select>
         <select class="selectbox" id="actChan"><option value="">Email &amp; text</option><option value="email">Email only</option><option value="sms">Text only</option></select>
@@ -1413,37 +1416,19 @@ async function loadActivity(){
 
 /* Sequence chips. Empty selection = every sequence. */
 let actSel=[], lastStats=null;
-/* The chip wall listed every sequence, and the table below listed them all again.
-   With 35 sequences that was two unreadable walls saying the same thing. The table
-   is now the filter: click a row to scope, click a folder to scope to the lot.
-   Only a compact summary of the current selection stays up here. */
+/* Activity filters through the same picker as Reports — multi-select, grouped by
+   folder, searchable. The table below is then purely a read-out: it was doing two
+   jobs at once, and a row that is both a statistic and a filter control is neither
+   obviously. */
 let actOpenFolders = new Set();
 
 function drawActChips(){
-  const el=$('actChips'); if(!el) return;
-  if(!actSel.length){ el.innerHTML=''; return; }
-  el.innerHTML =
-    `<span class="actsel-lbl">Showing</span>` +
-    actSel.map(k=>`<button class="rpchip on" data-ac="${esc(k)}">${esc(campaigns[k]?.label||k)} <span class="x">&times;</span></button>`).join('') +
-    `<button class="rpchip" data-acclear>Clear</button>`;
-  el.querySelectorAll('[data-ac]').forEach(b=>b.onclick=()=>{
-    actSel = actSel.filter(x=>x!==b.dataset.ac);
-    drawActChips(); renderActivity();
+  renderPicker('actChips', actSel, (next, onlyUi) => {
+    const changed = next.join('|') !== actSel.join('|');
+    actSel = next;
+    drawActChips();
+    if (changed && !onlyUi) renderActivity();
   });
-  const c=el.querySelector('[data-acclear]');
-  if(c) c.onclick=()=>{ actSel=[]; drawActChips(); renderActivity(); };
-}
-
-function toggleActSel(k, additive){
-  if(additive) actSel = actSel.includes(k) ? actSel.filter(x=>x!==k) : [...actSel,k];
-  else actSel = (actSel.length===1 && actSel[0]===k) ? [] : [k];
-  drawActChips(); renderActivity();
-}
-
-function toggleActFolder(id, keys){
-  const all = keys.every(k=>actSel.includes(k));
-  actSel = all ? actSel.filter(k=>!keys.includes(k)) : [...new Set([...actSel, ...keys])];
-  drawActChips(); renderActivity();
 }
 
 /* Tiles + all-time table, both scoped to the chip selection.
@@ -1464,7 +1449,7 @@ function renderActivity(){
   const cnt=(type,days)=>mine.filter(e=>e.type===type&&inWindow(e.t,days)).length;
   const today={sent:cnt('sent',1),opened:cnt('opened',1),clicked:cnt('clicked',1),replied:cnt('replied',1),errors:cnt('error',1)};
   const week ={sent:cnt('sent',7),opened:cnt('opened',7),clicked:cnt('clicked',7),replied:cnt('replied',7),errors:cnt('error',7)};
-  const note=scoped?'in feed':'this week';
+  const note=scoped?'in filter':'this week';
 
   const tile=(cls,n,lbl,wk,all)=>`<div class="statcard ${cls}"><div class="big">${n}</div><div class="lbl">${lbl}</div><div class="wk">${wk} ${note}${all!=null?` \u00b7 ${all} all time`:''}</div></div>`;
   $('statGrid').innerHTML=
@@ -1501,46 +1486,37 @@ function renderActivity(){
 
   const seqRow=(k)=>{ const v=pc[k]||{}, em=emailSent(v);
     const on=actSel.includes(k);
-    return `<tr class="seqrow${on?' on':''}" data-seq="${esc(k)}"><td><span class="sqbar"></span>${esc(campaigns[k]?.label||k)}</td>`+
+    return `<tr class="seqrow${on?' on':''}"><td><span class="sqbar"></span>${esc(campaigns[k]?.label||k)}</td>`+
       `<td>${v.sent||0}</td>${cell(v.opened,em)}${cell(v.clicked,em)}${cell(v.replied,v.sent||0)}</tr>`;
   };
 
-  // Group by the folders already used in the sequence list, so the same mental
-  // model works in both places. Folders start closed; a folder holding a selected
-  // sequence opens itself.
-  const withStats=Object.keys(pc).filter(k=>campaigns[k]);
-  const groups=folders.map(f=>({ id:f.id, name:f.name, keys:withStats.filter(k=>campaigns[k].folder===f.id) }))
-    .filter(g=>g.keys.length);
-  const loose=withStats.filter(k=>!folders.some(f=>campaigns[k].folder===f.id));
-  if(loose.length) groups.push({ id:'__loose', name:'Ungrouped', keys:loose });
+  // Every folder is listed, including ones that have not sent anything — a folder
+  // vanishing because it has no stats is how folders went missing before.
+  const groups = pickerGroups();
 
   let body='';
   for(const g of groups){
     const t=sum(g.keys);
-    const open=actOpenFolders.has(g.id)||g.keys.some(k=>actSel.includes(k));
+    const open=actOpenFolders.has(g.id);
     const picked=g.keys.filter(k=>actSel.includes(k)).length;
     body+=`<tr class="grow${open?' open':''}" data-fold="${esc(g.id)}">`+
       `<td><span class="gcar">\u25b8</span><svg class="gfic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`+
-      `<b>${esc(g.name)}</b> <span class="gcount">${g.keys.length}${picked?` \u00b7 ${picked} selected`:''}</span></td>`+
+      `<b>${esc(g.name)}</b> <span class="gcount">${g.keys.length}${picked?` \u00b7 ${picked} in filter`:''}</span></td>`+
       `<td>${t.sent}</td>${cell(t.opened,t.em)}${cell(t.clicked,t.em)}${cell(t.replied,t.sent)}</tr>`;
     if(open) body+=g.keys.sort((a,b)=>(campaigns[a].label||a).localeCompare(campaigns[b].label||b)).map(seqRow).join('');
   }
 
   $('campTotals').innerHTML=body
     ? `<div class="tablewrap"><table class="tbl acttbl"><thead><tr><th>Sequence \u00b7 all time</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>${body}</tbody></table></div>`
-      + `<div class="hint" style="margin:8px 2px 0">Click a sequence to show only its events. Shift-click to add another. Click a folder name to take the whole folder.</div>`
+      + `<div class="hint" style="margin:8px 2px 0">Open a folder to see its sequences. Use <b>Showing</b> above to filter the feed and the tiles.</div>`
     : '<div class="empty" style="padding:14px 0">No totals yet</div>';
 
   $('campTotals').querySelectorAll('.grow').forEach(r=>{
-    r.onclick=(e)=>{
-      const g=groups.find(x=>x.id===r.dataset.fold); if(!g) return;
-      // The name scopes the feed to the folder; anywhere else just opens it.
-      if(e.target.closest('b')) toggleActFolder(g.id,g.keys);
-      else { actOpenFolders.has(g.id)?actOpenFolders.delete(g.id):actOpenFolders.add(g.id); renderActivity(); }
+    r.onclick=()=>{
+      const id=r.dataset.fold;
+      actOpenFolders.has(id)?actOpenFolders.delete(id):actOpenFolders.add(id);
+      renderActivity();
     };
-  });
-  $('campTotals').querySelectorAll('.seqrow').forEach(r=>{
-    r.onclick=(e)=>toggleActSel(r.dataset.seq, e.shiftKey);
   });
 
   renderActRows();
@@ -1827,97 +1803,125 @@ async function loadReports(){
    in full to find one thing. This is a picker instead: a button saying what is
    currently shown, opening a panel grouped by the same folders as the sequence
    list, with checkboxes. The wall only appears when you ask for it. */
-function rpSummaryLabel(){
-  if(!rpSel.length) return 'All sequences';
-  if(rpSel.length===1) return campaigns[rpSel[0]]?.label||rpSel[0];
-  return `${rpSel.length} sequences`;
+/* ── Sequence picker ──────────────────────────────────────────────────────────
+   One component, used by both Reports and Activity, so the two pages filter the
+   same way. Folders come from the sequence list, every folder is shown whether it
+   has sent anything or not, and a search box keeps it usable at 35 sequences.
+
+   Everything is delegated from the host element: handlers are attached once and
+   survive every re-render, so a redraw mid-selection cannot leave dead buttons
+   behind. */
+const pickerState = {};   // hostId -> { open, query, wired }
+
+function pickerGroups(){
+  const keys = Object.keys(campaigns);
+  const groups = folders.map(f => ({
+    id: f.id, name: f.name,
+    keys: keys.filter(k => campaigns[k].folder === f.id)
+  })).filter(g => g.keys.length);
+  const loose = keys.filter(k => !folders.some(f => campaigns[k].folder === f.id));
+  if (loose.length) groups.push({ id: '__loose', name: 'Ungrouped', keys: loose });
+  return groups;
 }
 
-/* Kept outside drawCampaignChips so the panel survives a re-render — ticking a
-   box reloads the report, and the picker must not slam shut while you are still
-   choosing. */
-let rpPanelOpen=false, rpOutsideHandler=null;
-
-function rpClosePanel(){
-  rpPanelOpen=false;
-  const panel=$('rpPanel'), btn=$('rpPickBtn');
-  if(panel) panel.hidden=true;
-  if(btn) btn.setAttribute('aria-expanded','false');
-  if(rpOutsideHandler){ document.removeEventListener('mousedown',rpOutsideHandler); rpOutsideHandler=null; }
+function pickerLabel(sel){
+  if (!sel.length) return 'All sequences';
+  if (sel.length === 1) return campaigns[sel[0]]?.label || sel[0];
+  return `${sel.length} sequences`;
 }
 
-function rpOpenPanel(){
-  rpPanelOpen=true;
-  const panel=$('rpPanel'), btn=$('rpPickBtn');
-  if(panel) panel.hidden=false;
-  if(btn) btn.setAttribute('aria-expanded','true');
-  if(rpOutsideHandler) document.removeEventListener('mousedown',rpOutsideHandler);
-  rpOutsideHandler=(e)=>{ if(!e.target.closest('#rpPanel') && !e.target.closest('#rpPickBtn')) rpClosePanel(); };
-  document.addEventListener('mousedown',rpOutsideHandler);
-}
+function renderPicker(hostId, sel, onChange){
+  const host = $(hostId); if (!host) return;
+  const st = pickerState[hostId] || (pickerState[hostId] = { open:false, query:'', wired:false });
+  const q = st.query.trim().toLowerCase();
 
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&rpPanelOpen) rpClosePanel(); });
+  const groups = pickerGroups().map(g => ({
+    ...g,
+    shown: q ? g.keys.filter(k => (campaigns[k].label||k).toLowerCase().includes(q) || g.name.toLowerCase().includes(q)) : g.keys
+  })).filter(g => g.shown.length);
 
-function drawCampaignChips(){
-  const host=$('rpCampaigns'); if(!host) return;
-  const keys=Object.keys(campaigns);
-  if(!keys.length){ host.innerHTML='<span class="rpempty">No sequences yet</span>'; return; }
-
-  const groups=folders.map(f=>({id:f.id,name:f.name,keys:keys.filter(k=>campaigns[k].folder===f.id)}))
-    .filter(g=>g.keys.length);
-  const loose=keys.filter(k=>!folders.some(f=>campaigns[k].folder===f.id));
-  if(loose.length) groups.push({id:'__loose',name:'Ungrouped',keys:loose});
-
-  host.innerHTML=
-    `<button class="rppick" id="rpPickBtn" aria-expanded="${rpPanelOpen}">
-       <span class="rppick-lbl">Showing</span>
-       <b>${esc(rpSummaryLabel())}</b>
-       <span class="rppick-car">\u25be</span>
+  host.innerHTML =
+    `<button type="button" class="rppick" data-pick-toggle aria-expanded="${st.open}">
+       <span class="rppick-lbl">Showing</span><b>${esc(pickerLabel(sel))}</b><span class="rppick-car">\u25be</span>
      </button>
-     ${rpSel.length?'<button class="rpchip" id="rpClear">Clear</button>':''}
-     <div class="rppanel" id="rpPanel" ${rpPanelOpen?'':'hidden'}>
+     ${sel.length ? '<button type="button" class="rpchip" data-pick-clear>Clear</button>' : ''}
+     <div class="rppanel" ${st.open ? '' : 'hidden'}>
        <div class="rppanel-top">
-         <span>${rpSel.length?`${rpSel.length} selected`:'All sequences'}</span>
-         <button class="rplink" id="rpDone">Done</button>
+         <input class="rpsearch" type="text" placeholder="Search sequences\u2026" value="${esc(st.query)}" data-pick-search>
+         <button type="button" class="rplink" data-pick-done>Done</button>
        </div>
        <div class="rppanel-body">
-       ${groups.map(g=>{
-         const on=g.keys.filter(k=>rpSel.includes(k)).length;
-         return `<div class="rpgroup">
-           <div class="rpgroup-head">
-             <b>${esc(g.name)}</b>
-             <button class="rplink" data-rpall="${esc(g.id)}">${on===g.keys.length?'None':'All'}</button>
-           </div>
-           ${g.keys.sort((a,b)=>(campaigns[a].label||a).localeCompare(campaigns[b].label||b)).map(k=>
-             `<label class="rpopt"><input type="checkbox" data-rp="${esc(k)}" ${rpSel.includes(k)?'checked':''}>
-               <span>${esc(campaigns[k].label||k)}</span></label>`).join('')}
-         </div>`;
-       }).join('')}
+         ${groups.length ? groups.map(g => {
+           const on = g.shown.filter(k => sel.includes(k)).length;
+           return `<div class="rpgroup">
+             <div class="rpgroup-head">
+               <b>${esc(g.name)}</b>
+               <span class="rpgcount">${g.shown.length}</span>
+               <button type="button" class="rplink" data-pick-all="${esc(g.id)}">${on === g.shown.length ? 'None' : 'All'}</button>
+             </div>
+             ${g.shown.sort((a,b)=>(campaigns[a].label||a).localeCompare(campaigns[b].label||b)).map(k =>
+               `<label class="rpopt"><input type="checkbox" data-pick="${esc(k)}" ${sel.includes(k)?'checked':''}>
+                  <span>${esc(campaigns[k].label||k)}</span></label>`).join('')}
+           </div>`;
+         }).join('') : '<div class="rpempty" style="padding:10px 4px">Nothing matches that</div>'}
        </div>
+       <div class="rppanel-foot">${sel.length ? `${sel.length} selected` : 'All sequences'}</div>
      </div>`;
 
-  const btn=$('rpPickBtn');
-  btn.onclick=(e)=>{ e.stopPropagation(); rpPanelOpen?rpClosePanel():rpOpenPanel(); };
-  $('rpDone').onclick=()=>rpClosePanel();
+  if (st.wired) return;
+  st.wired = true;
 
-  const clear=$('rpClear');
-  if(clear) clear.onclick=()=>{ rpSel=[]; loadReports(); };
-
-  $('rpPanel').querySelectorAll('[data-rp]').forEach(cb=>cb.onchange=()=>{
-    const k=cb.dataset.rp;
-    rpSel = cb.checked ? [...new Set([...rpSel,k])] : rpSel.filter(x=>x!==k);
-    loadReports();
+  // Delegated: bound once to the host, so re-rendering never orphans a handler.
+  host.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t.closest('[data-pick-toggle]')) { e.stopPropagation(); st.open = !st.open; onChange(sel, true); return; }
+    if (t.closest('[data-pick-done]'))   { st.open = false; onChange(sel, true); return; }
+    if (t.closest('[data-pick-clear]'))  { st.open = false; onChange([], false); return; }
+    const all = t.closest('[data-pick-all]');
+    if (all) {
+      const g = pickerGroups().find(x => x.id === all.dataset.pickAll); if (!g) return;
+      const cur = pickerCurrent(hostId);
+      const every = g.keys.every(k => cur.includes(k));
+      onChange(every ? cur.filter(k => !g.keys.includes(k)) : [...new Set([...cur, ...g.keys])], false);
+    }
   });
 
-  $('rpPanel').querySelectorAll('[data-rpall]').forEach(b=>b.onclick=()=>{
-    const g=groups.find(x=>x.id===b.dataset.rpall); if(!g) return;
-    const all=g.keys.every(k=>rpSel.includes(k));
-    rpSel = all ? rpSel.filter(k=>!g.keys.includes(k)) : [...new Set([...rpSel,...g.keys])];
-    loadReports();
+  host.addEventListener('change', (e) => {
+    const cb = e.target.closest('[data-pick]'); if (!cb) return;
+    const cur = pickerCurrent(hostId);
+    const k = cb.dataset.pick;
+    onChange(cb.checked ? [...new Set([...cur, k])] : cur.filter(x => x !== k), false);
   });
 
-  // Re-attach the outside handler after a re-render, or it points at a dead node.
-  if(rpPanelOpen) rpOpenPanel();
+  host.addEventListener('input', (e) => {
+    const box = e.target.closest('[data-pick-search]'); if (!box) return;
+    st.query = box.value;
+    onChange(pickerCurrent(hostId), false);
+    const again = $(hostId).querySelector('[data-pick-search]');
+    if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+  });
+
+  document.addEventListener('mousedown', (e) => {
+    if (!st.open) return;
+    if (e.target.closest(`#${hostId}`)) return;
+    st.open = false;
+    onChange(pickerCurrent(hostId), true);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && st.open) { st.open = false; onChange(pickerCurrent(hostId), true); }
+  });
+}
+
+// The picker does not own the selection; each page does. This reads it back.
+function pickerCurrent(hostId){ return hostId === 'rpCampaigns' ? rpSel : actSel; }
+
+function drawCampaignChips(){
+  renderPicker('rpCampaigns', rpSel, (next, onlyUi) => {
+    const changed = next.join('|') !== rpSel.join('|');
+    rpSel = next;
+    if (changed && !onlyUi) loadReports(); else drawCampaignChips();
+  });
 }
 
 function pct(n,d){ return d?Math.round(1000*n/d)/10:0; }
