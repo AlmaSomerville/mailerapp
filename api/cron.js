@@ -170,6 +170,7 @@ export default async function handler(req, res) {
         windowBy,
         paused,
         tiers: Object.fromEntries(Object.entries(campaigns).map(([k, c]) => [k, c?.priority || 'normal'])),
+        verifyCount: (k) => getDueCount(k).catch(() => null),
         errors: summary.errors.length
       });
       if (a.alerted.length || a.recovered.length) summary.alerts = a;
