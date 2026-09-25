@@ -1,6 +1,6 @@
 // api/cron.js — the sweep. Runs every 5 min via vercel.json cron.
 import { getCampaigns } from '../lib/store.js';
-import { buildOwnerMap, getContactLive, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact, getDueCount } from '../lib/hubspot.js';
+import { buildOwnerMap, getContactLive, getContactsLive, getOwnerAndDealNameMany, getWaitingContacts, getCompletedContacts, getDealOwnerId, updateContact, getDueCount } from '../lib/hubspot.js';
 import { allocate } from '../lib/allocate.js';
 import { checkAlerts, rememberWaiting, readWaiting } from '../lib/alert.js';
 import { processContact } from '../lib/process.js';
@@ -40,6 +40,20 @@ export default async function handler(req, res) {
     if (starved?.length) summary.starved = starved;
     if (paused.length) summary.paused = paused;
 
+    // Prefetch. The per-contact live read and deal lookup cost three paced HubSpot
+    // calls each — roughly 540ms of pure queue time per contact, which capped a run
+    // long before any rate limit did. Batched at 100 per call, 80 contacts cost
+    // about 4 calls instead of 240.
+    const ids = contacts.map((c) => c.id);
+    let freshById = new Map();
+    let dealById = new Map();
+    try {
+      [freshById, dealById] = await Promise.all([
+        getContactsLive(ids),
+        getOwnerAndDealNameMany(ids)
+      ]);
+    } catch { /* fall through to the per-contact reads below */ }
+
     const senderCounts = {};
     // Per-campaign outcomes, so alerting can tell a stall from a send-window
     // deferral. Without that distinction it would fire every night.
@@ -52,9 +66,11 @@ export default async function handler(req, res) {
       }
       const email = contact.properties?.email || contact.id;
       try {
-        // Search results can be stale — re-fetch live before acting
-        const fresh = await getContactLive(contact.id);
-        const r = await processContact(fresh, campaigns, ownerMap);
+        // Search results can be stale — act on a live read: from the batch above
+        // where we have it, or a direct read if that contact was missed.
+        const fresh = freshById.get(String(contact.id)) || await getContactLive(contact.id);
+        const pre = dealById.has(String(contact.id)) ? { deal: dealById.get(String(contact.id)) } : null;
+        const r = await processContact(fresh, campaigns, ownerMap, pre);
         const ck = fresh.properties?.dw_campaign || contact.properties?.dw_campaign || '?';
         if (r.status === 'sent') { summary.sent++; sentBy[ck] = (sentBy[ck] || 0) + 1; }
         else if (r.status === 'completed') { summary.completed++; if (r.detail) { summary.sent++; sentBy[ck] = (sentBy[ck] || 0) + 1; } }
